@@ -331,15 +331,8 @@
   :type 'file)
 
 (defun run-ampl (file &optional outbuf errbuf args)
-  "Run the AMPL command synchronously with the given FILE and capture the output.
-Extra command line arguments for AMPL can be supplied as a list of strings in ARGS.
-By default output will be printed to a buffer named \"*AMPL output*\", and
-errors will be printed to \"*AMPL Errors*\", but these can be overridden
-with the OUTBUF & ERRBUF arguments.
-When called interactively FILE will be prompted for and either the output buffer,
-or error buffer will be displayed depending on whether the command is successful or not.
-If called with a prefix argument then ARGS will also be prompted for.
-To run AMPL asynchronously see `run-ampl-async'."
+  "Run the AMPL command synchronously with the given FILE as input and capture the output.
+Arguments are the same as for `run-ampl-async' except the first arg can only be a filename."
   (interactive (list (read-file-name "AMPL file: ")
 		     nil nil (if current-prefix-arg
 				 (cl-remove ""
@@ -369,15 +362,26 @@ To run AMPL asynchronously see `run-ampl-async'."
             (with-current-buffer output-buffer (buffer-string))
           (with-current-buffer error-buffer (buffer-string)))))))
 
-(defun run-ampl-async (file &optional outbuf errbuf)
-  "Run the AMPL command with the given FILE asynchronously and capture the output.
+(defun run-ampl-async (input &optional outbuf errbuf args)
+  "Run the AMPL command with the given INPUT & ARGS asynchronously and capture the output.
+INPUT can either be a file or string to be fed into the STDIN of the ampl process.
+Extra command line arguments for AMPL can be supplied as a list of strings in ARGS
+ (which may include a model file so that you can use INPUT for supplying data).
 By default output will be printed to a buffer named \"*AMPL output*\", and
 errors will be printed to \"*AMPL Errors*\", but these can be overridden
 with the OUTBUF & ERRBUF arguments.
-When called interactively FILE will be prompted for and either the output buffer,
+When called interactively a file will be prompted for INPUT and either the output buffer,
 or error buffer will be displayed depending on whether the command is successful or not.
+If called with a prefix argument then ARGS will also be prompted for.
 To run AMPL synchronously see `run-ampl'."
-  (interactive "fAMPL File: ")
+  (interactive (let ((input (read-file-name "AMPL file: ")))
+		 (list input nil nil
+		       (if current-prefix-arg
+			   (cl-remove ""
+				      (split-string
+				       (read-string "Extra command line options for AMPL: ")
+				       "\\s-+")
+				      :test 'equal)))))
   (let* ((output-buffer (get-buffer-create (or outbuf "*AMPL Output*")))
          (error-buffer (get-buffer-create (or errbuf "*AMPL Errors*"))))
     ;; Clear previous content
@@ -389,7 +393,7 @@ To run AMPL synchronously see `run-ampl'."
       :name "AMPL Process"
       :buffer output-buffer
       :stderr error-buffer
-      :command (list ampl-binary)
+      :command (cons ampl-binary args)
       :sentinel (lambda (proc event)
 		  (when (memq (process-status proc) '(exit signal))
 		    (let ((exit-status (process-exit-status proc))
@@ -413,8 +417,12 @@ To run AMPL synchronously see `run-ampl'."
 			    (display-buffer error-buffer))))))))
      (list :error-buffer error-buffer :interactive-p (called-interactively-p 'any)))
     ;; Send the contents of the file to the process
-    (process-send-string "AMPL Process" (with-temp-buffer (insert-file-contents file)
-							  (buffer-string)))
+    (process-send-string "AMPL Process" (if (file-exists-p input)
+					    (if (file-readable-p input)
+						(with-temp-buffer (insert-file-contents input)
+								  (buffer-string))
+					      (error "Cannot read %s" input))
+					  input))
     (process-send-eof "AMPL Process")))
 
 (provide 'ampl-mode)  ; So others can (require 'ampl-mode)
