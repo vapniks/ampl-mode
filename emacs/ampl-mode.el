@@ -324,7 +324,91 @@
   (setq mode-name "Ampl")
   (use-local-map ampl-mode-map)   ; Load Ampl keymap
   (run-mode-hooks 'ampl-mode-hook)
-)
+  )
+
+(defcustom ampl-binary "ampl"
+  "Name/path to the ampl binary executable."
+  :type 'file)
+
+(defun run-ampl (file &optional outbuf errbuf)
+  "Run the AMPL command synchronously with the given FILE and capture the output.
+By default output will be printed to a buffer named \"*AMPL output*\", and
+errors will be printed to \"*AMPL Errors*\", but these can be overridden
+with the OUTBUF & ERRBUF arguments.
+When called interactively FILE will be prompted for and either the output buffer,
+or error buffer will be displayed depending on whether the command is successful or not.
+To run AMPL asynchronously see `run-ampl-async'."
+  (interactive "fAMPL File: ")
+  (let ((output-buffer (get-buffer-create (or outbuf "*AMPL Output*")))
+	(error-file (make-temp-file "ampl"))
+	(error-buffer (get-buffer-create (or errbuf "*AMPL Errors*"))))
+    ;; Clear previous content
+    (with-current-buffer output-buffer (erase-buffer))
+    (with-current-buffer error-buffer (erase-buffer))
+    ;; Run the process
+    (let ((exit-code (call-process ampl-binary file (list output-buffer error-file) nil)))
+      (with-current-buffer error-buffer (insert-file-contents error-file))
+      ;; Display buffers if called interactively
+      (if (called-interactively-p 'any)
+	  (if (zerop exit-code)
+	      (and (message "AMPL command executed successfully. See %s for output." output-buffer)
+		   (display-buffer output-buffer))
+	    (and (message "AMPL command failed. See %s for errors." error-buffer)
+		 (display-buffer error-buffer)))
+        ;; Return result when not interactive
+        (if (zerop exit-code)
+            (with-current-buffer output-buffer (buffer-string))
+          (with-current-buffer error-buffer (buffer-string)))))))
+
+(defun run-ampl-async (file &optional outbuf errbuf)
+  "Run the AMPL command with the given FILE asynchronously and capture the output.
+By default output will be printed to a buffer named \"*AMPL output*\", and
+errors will be printed to \"*AMPL Errors*\", but these can be overridden
+with the OUTBUF & ERRBUF arguments.
+When called interactively FILE will be prompted for and either the output buffer,
+or error buffer will be displayed depending on whether the command is successful or not.
+To run AMPL synchronously see `run-ampl'."
+  (interactive "fAMPL File: ")
+  (let* ((output-buffer (get-buffer-create (or outbuf "*AMPL Output*")))
+         (error-buffer (get-buffer-create (or errbuf "*AMPL Errors*"))))
+    ;; Clear previous content
+    (with-current-buffer output-buffer (erase-buffer))
+    (with-current-buffer error-buffer (erase-buffer))
+    ;; Run the asynchronous process using make-process
+    (set-process-plist
+     (make-process
+      :name "AMPL Process"
+      :buffer output-buffer
+      :stderr error-buffer
+      :command (list ampl-binary)
+      :sentinel (lambda (proc event)
+		  (when (memq (process-status proc) '(exit signal))
+		    (let ((exit-status (process-exit-status proc))
+			  (error-buffer (process-get proc :error-buffer))
+			  (output-buffer (process-buffer proc))
+			  (interactive-p (process-get proc :interactive-p)))
+		      (if (zerop exit-status)
+			  (progn
+			    (with-current-buffer error-buffer
+			      (insert "AMPL command executed successfully.\n"))
+			    (when interactive-p
+			      (message "AMPL command executed successfully. See %s for output."
+				       output-buffer)
+			      (display-buffer output-buffer)))
+			(progn
+			  (with-current-buffer error-buffer
+			    (insert (format "AMPL command failed with exit status %d.\n"
+					    exit-status)))
+			  (when interactive-p
+			    (message "AMPL command failed. See %s for errors." error-buffer)
+			    (display-buffer error-buffer))))))))
+     (list :error-buffer error-buffer :interactive-p (called-interactively-p 'any)))
+    ;; Send the contents of the file to the process
+    (process-send-string "AMPL Process" (with-temp-buffer (insert-file-contents file)
+							  (buffer-string)))
+    (process-send-eof "AMPL Process")))
+
+
 
 (provide 'ampl-mode)  ; So others can (require 'ampl-mode)
 
