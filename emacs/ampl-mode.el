@@ -330,15 +330,23 @@
   "Name/path to the ampl binary executable."
   :type 'file)
 
-(defun run-ampl (file &optional outbuf errbuf)
+(defun run-ampl (file &optional outbuf errbuf args)
   "Run the AMPL command synchronously with the given FILE and capture the output.
+Extra command line arguments for AMPL can be supplied as a list of strings in ARGS.
 By default output will be printed to a buffer named \"*AMPL output*\", and
 errors will be printed to \"*AMPL Errors*\", but these can be overridden
 with the OUTBUF & ERRBUF arguments.
 When called interactively FILE will be prompted for and either the output buffer,
 or error buffer will be displayed depending on whether the command is successful or not.
+If called with a prefix argument then ARGS will also be prompted for.
 To run AMPL asynchronously see `run-ampl-async'."
-  (interactive "fAMPL File: ")
+  (interactive (list (read-file-name "AMPL file: ")
+		     nil nil (if current-prefix-arg
+				 (cl-remove ""
+					    (split-string
+					     (read-string "Extra command line options for AMPL: ")
+					     "\\s-+")
+					    :test 'equal))))
   (let ((output-buffer (get-buffer-create (or outbuf "*AMPL Output*")))
 	(error-file (make-temp-file "ampl"))
 	(error-buffer (get-buffer-create (or errbuf "*AMPL Errors*"))))
@@ -346,7 +354,8 @@ To run AMPL asynchronously see `run-ampl-async'."
     (with-current-buffer output-buffer (erase-buffer))
     (with-current-buffer error-buffer (erase-buffer))
     ;; Run the process
-    (let ((exit-code (call-process ampl-binary file (list output-buffer error-file) nil)))
+    (let ((exit-code (apply 'call-process ampl-binary file (list output-buffer error-file)
+			    nil args)))
       (with-current-buffer error-buffer (insert-file-contents error-file))
       ;; Display buffers if called interactively
       (if (called-interactively-p 'any)
@@ -407,8 +416,6 @@ To run AMPL synchronously see `run-ampl'."
     (process-send-string "AMPL Process" (with-temp-buffer (insert-file-contents file)
 							  (buffer-string)))
     (process-send-eof "AMPL Process")))
-
-
 
 (provide 'ampl-mode)  ; So others can (require 'ampl-mode)
 
