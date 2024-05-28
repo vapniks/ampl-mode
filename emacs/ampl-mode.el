@@ -369,7 +369,9 @@ Extra command line arguments for AMPL can be supplied as a list of strings in AR
  (which may include a model file so that you can use INPUT for supplying data).
 By default output will be printed to a buffer named \"*AMPL output*\", and
 errors will be printed to \"*AMPL Errors*\", but these can be overridden
-with the OUTBUF & ERRBUF arguments.
+with the OUTBUF & ERRBUF arguments. 
+The lisp process object is returned by the function.
+
 When called interactively a file will be prompted for INPUT and either the output buffer,
 or error buffer will be displayed depending on whether the command is successful or not.
 If called with a prefix argument then ARGS will also be prompted for.
@@ -383,47 +385,48 @@ To run AMPL synchronously see `run-ampl'."
 				       "\\s-+")
 				      :test 'equal)))))
   (let* ((output-buffer (get-buffer-create (or outbuf "*AMPL Output*")))
-         (error-buffer (get-buffer-create (or errbuf "*AMPL Errors*"))))
+         (error-buffer (get-buffer-create (or errbuf "*AMPL Errors*")))
+	 proc)
     ;; Clear previous content
     (with-current-buffer output-buffer (erase-buffer))
     (with-current-buffer error-buffer (erase-buffer))
     ;; Run the asynchronous process using make-process
-    (set-process-plist
-     (make-process
-      :name "AMPL Process"
-      :buffer output-buffer
-      :stderr error-buffer
-      :command (cons ampl-binary args)
-      :sentinel (lambda (proc event)
-		  (when (memq (process-status proc) '(exit signal))
-		    (let ((exit-status (process-exit-status proc))
-			  (error-buffer (process-get proc :error-buffer))
-			  (output-buffer (process-buffer proc))
-			  (interactive-p (process-get proc :interactive-p)))
-		      (if (zerop exit-status)
-			  (progn
-			    (with-current-buffer error-buffer
-			      (insert "AMPL command executed successfully.\n"))
-			    (when interactive-p
-			      (message "AMPL command executed successfully. See %s for output."
-				       output-buffer)
-			      (display-buffer output-buffer)))
-			(progn
-			  (with-current-buffer error-buffer
-			    (insert (format "AMPL command failed with exit status %d.\n"
-					    exit-status)))
-			  (when interactive-p
-			    (message "AMPL command failed. See %s for errors." error-buffer)
-			    (display-buffer error-buffer))))))))
-     (list :error-buffer error-buffer :interactive-p (called-interactively-p 'any)))
+    (setq proc (make-process
+		:name "AMPL Process"
+		:buffer output-buffer
+		:stderr error-buffer
+		:command (cons ampl-binary args)
+		:sentinel (lambda (proc event)
+			    (when (memq (process-status proc) '(exit signal))
+			      (let ((exit-status (process-exit-status proc))
+				    (error-buffer (process-get proc :error-buffer))
+				    (output-buffer (process-buffer proc))
+				    (interactive-p (process-get proc :interactive-p)))
+				(if (zerop exit-status)
+				    (progn
+				      (with-current-buffer error-buffer
+					(insert "AMPL command executed successfully.\n"))
+				      (when interactive-p
+					(message "AMPL command executed successfully. See %s for output."
+						 output-buffer)
+					(display-buffer output-buffer)))
+				  (progn
+				    (with-current-buffer error-buffer
+				      (insert (format "AMPL command failed with exit status %d.\n"
+						      exit-status)))
+				    (when interactive-p
+				      (message "AMPL command failed. See %s for errors." error-buffer)
+				      (display-buffer error-buffer)))))))))
+    (set-process-plist proc (list :error-buffer error-buffer :interactive-p (called-interactively-p 'any)))
     ;; Send the contents of the file to the process
-    (process-send-string "AMPL Process" (if (file-exists-p input)
-					    (if (file-readable-p input)
-						(with-temp-buffer (insert-file-contents input)
-								  (buffer-string))
-					      (error "Cannot read %s" input))
-					  input))
-    (process-send-eof "AMPL Process")))
+    (process-send-string proc (if (file-exists-p input)
+				  (if (file-readable-p input)
+				      (with-temp-buffer (insert-file-contents input)
+							(buffer-string))
+				    (error "Cannot read %s" input))
+				input))
+    (process-send-eof proc)
+    proc))
 
 (provide 'ampl-mode)  ; So others can (require 'ampl-mode)
 
